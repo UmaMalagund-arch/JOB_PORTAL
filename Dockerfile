@@ -1,15 +1,6 @@
-Stage 1: Build the Spring Boot JAR
-FROM maven:3.9.6-eclipse-temurin-17 AS build
-WORKDIR /app
-COPY pom.xml .
-RUN mvn -q -e -B dependency:go-offline
-COPY src ./src
-RUN mvn -q -e -B clean package -DskipTests
-
-
-Stage 2: Run the JAR
-FROM eclipse-temurin:17-jdk
-WORKDIR /app
-COPY --from=build /app/target/*.jar app.jar
-EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+FROM tomcat:9-jdk17
+LABEL maintainer="umamalagund635@gmail.com"
+RUN rm -rf /usr/local/tomcat/webapps/ROOT
+COPY target/jobportal.war /usr/local/tomcat/webapps/ROOT.war
+EXPOSE 8084
+CMD ["catalina.sh", "run"]
