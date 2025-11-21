@@ -13,7 +13,7 @@ pipeline{
         stage('Github src') {
             steps {
                 echo 'Checking out source code...'
-                git branch: 'master', url: 'https://github.com/UmaMalagund-arch/PAYTM_CICD_DOCKER_MASTER'
+                git branch: 'main', url: 'https://github.com/UmaMalagund-arch/JOB_PORTAL'
             }
         }
 
