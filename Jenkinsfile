@@ -1,145 +1,85 @@
-pipeline {
+pipeline{
     agent any
-
-    tools {
-        maven 'maven'
+    tools{
+        maven 'maven' 
     }
-
-    stages {
-
-        stage('Build WAR') {
+    environment {
+        DOCKERHUB_CREDENTIALS_ID = 'credentials' 
+        DOCKERHUB_USERNAME       = 'umamalagund9620'
+        IMAGE_NAME               = "${env.DOCKERHUB_USERNAME}/my-app"
+        CONTAINER_NAME           = "my-app-container"
+    }
+    stages{
+        stage('Github src') {
             steps {
-                echo "📦 Building Job-Portal project..."
-                sh 'mvn clean package -DskipTests'
-            }
-            post {
-                success { echo '✔ WAR build successful.' }
-                failure { echo '❌ WAR build failed.' }
+                echo 'Checking out source code...'
+                git branch: 'master', url: 'https://github.com/UmaMalagund-arch/PAYTM_CICD_DOCKER_MASTER'
             }
         }
 
-        stage('Docker Build Image') {
-            steps {
-                echo "🐳 Building Docker image for Job-Portal..."
-                sh 'sudo docker build -t jobportal-cicd .'
-            }
-            post {
-                success { echo '✔ Docker image created.' }
-                failure { echo '❌ Docker build failed.' }
+        stage('Build stage'){
+            steps{
+                echo 'Building with Maven...'
+                sh 'mvn clean package'
             }
         }
 
-        stage('Docker Login') {
+        stage('Build Docker Image') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-cred-id',
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh '''
-                        echo "$PASS" | sudo docker login -u "$USER" --password-stdin
-                    '''
+                echo "Building Docker image: ${IMAGE_NAME}:${BUILD_NUMBER}"
+                sh "sudo docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+            }
+        }
+
+        stage('Login to Docker Hub') {
+            steps {
+                echo 'Logging in to Docker Hub...'
+                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDENTIALS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | sudo docker login -u $DOCKER_USER --password-stdin'
                 }
             }
         }
 
-        stage('Docker Tag Image') {
-            steps {
-                echo "🏷 Tagging image..."
-                sh 'sudo docker tag jobportal-cicd umamalagund9620/jobportal-cicd:latest'
-            }
-            post {
-                success { echo '✔ Image tagged.' }
-                failure { echo '❌ Failed to tag image.' }
-            }
-        }
-
-        stage('Docker Push Image') {
-            steps {
-                echo "📤 Pushing image to DockerHub..."
-                sh 'sudo docker push umamalagund9620/jobportal-cicd:latest'
-            }
-            post {
-                success { echo '✔ Image pushed to DockerHub.' }
-                failure { echo '❌ Failed to push image.' }
-            }
-        }
-
-        stage('Cleanup Local Images') {
-            steps {
-                echo "🧹 Cleaning up local Docker images..."
-                sh '''
-                    sudo docker rmi umamalagund9620/jobportal-cicd:latest || true
-                    sudo docker rmi jobportal-cicd || true
-                '''
-            }
-            post {
-                success { echo '✔ Cleanup done.' }
-                failure { echo '❌ Cleanup failed.' }
-            }
-        }
-
-        stage('Docker Logout') {
-            steps {
-                echo "🔒 Logging out from DockerHub..."
-                sh 'sudo docker logout'
-            }
-        }
-
-        stage('Deploy Container') {
+        stage('Tag and Push Docker Image') {
             steps {
                 script {
-
-                    echo "🔍 Checking if 'jobportal-container' already exists..."
-
-                    def containerExists = sh(
-                        script: "sudo docker ps -a --format '{{.Names}}' | grep -w jobportal-container || true",
-                        returnStdout: true
-                    ).trim()
-
-                    if (containerExists) {
-                        echo "⚠️ Container already exists."
-
-                        def userChoice = input(
-                            id: 'ContainerRestart',
-                            message: 'Container exists. Redeploy?',
-                            parameters: [choice(choices: ['Yes', 'No'], description: 'Restart container?', name: 'Confirm')]
-                        )
-
-                        if (userChoice == 'Yes') {
-                            echo "🛑 Stopping old container..."
-                            sh '''
-                                sudo docker stop jobportal-container || true
-                                sudo docker rm jobportal-container || true
-
-                                echo "🚀 Starting new container..."
-                                sudo docker run -d -p 8084:8080 --name jobportal-container umamalagund9620/jobportal-cicd:latest
-                            '''
-                        } else {
-                            echo "⏩ Skipping redeploy."
-                        }
-
-                    } else {
-
-                        echo "🚀 No container found — starting new one..."
-                        sh '''
-                            sudo docker run -d -p 8084:8080 --name jobportal-container umamalagund9620/jobportal-cicd:latest
-                        '''
-                    }
+                    echo "Pushing image: ${IMAGE_NAME}:${BUILD_NUMBER}"
+                    sh "sudo docker push ${IMAGE_NAME}:${BUILD_NUMBER}"
+                    
+                    echo "Tagging as 'latest'..."
+                    sh "sudo docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
+                    
+                    echo "Pushing 'latest' tag..."
+                    sh "sudo docker push ${IMAGE_NAME}:latest"
                 }
             }
         }
 
-        stage('Done') {
+        stage('Remove Local Docker Image') {
             steps {
-                echo "🎉 Pipeline completed!"
+                echo "Removing local image: ${IMAGE_NAME}:${BUILD_NUMBER}"
+                sh "sudo docker rmi ${IMAGE_NAME}:${BUILD_NUMBER}"
+            }
+        }
+
+        stage('Run Container') {
+            steps {
+                echo "Running new container ${CONTAINER_NAME} on port 8084..."
+                sh "sudo docker stop ${CONTAINER_NAME} || true"
+                sh "sudo docker rm ${CONTAINER_NAME} || true"
+                sh "sudo docker run -d -p 8085:8080 --name ${CONTAINER_NAME} ${IMAGE_NAME}:latest"
             }
         }
     }
-
     post {
-        always { echo '📌 Pipeline finished executing.' }
-        success { echo '✅ Pipeline succeeded.' }
-        failure { echo '❌ Pipeline failed.' }
+        always {
+            echo 'This will always run after the stages are complete.'
+        }
+        success {
+            echo 'This will run only if the pipeline succeeds.'
+        }
+        failure {
+            echo 'This will run only if the pipeline fails.'
+        }
     }
 }
