@@ -1,85 +1,62 @@
-pipeline{
+pipeline {
     agent any
-    tools{
-        maven 'maven' 
+
+    tools {
+        maven 'maven'
+        jdk 'jdk17'
     }
+
     environment {
-        DOCKERHUB_CREDENTIALS_ID = 'credentials' 
-        DOCKERHUB_USERNAME       = 'umamalagund9620'
-        IMAGE_NAME               = "${env.DOCKERHUB_USERNAME}/my-app"
-        CONTAINER_NAME           = "my-app-container"
+        APP_NAME = "jobportal"
+        BRANCH = "main"
     }
-    stages{
-        stage('Github src') {
+
+    stages {
+
+        stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
-                git branch: 'main', url: 'https://github.com/UmaMalagund-arch/JOB_PORTAL'
+                echo "Pulling source code..."
+                git branch: "main", url: "https://github.com/UmaMalagund-arch/JOB_PORTAL.git"
             }
         }
 
-        stage('Build stage'){
-            steps{
-                echo 'Building with Maven...'
-                sh 'mvn clean package'
+        stage('Build') {
+            steps {
+                sh "mvn clean package -DskipTests"
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Test') {
             steps {
-                echo "Building Docker image: ${IMAGE_NAME}:${BUILD_NUMBER}"
-                sh "sudo docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+                sh "mvn test"
             }
         }
 
-        stage('Login to Docker Hub') {
+        stage('Archive Artifact') {
             steps {
-                echo 'Logging in to Docker Hub...'
-                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDENTIALS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo $DOCKER_PASS | sudo docker login -u $DOCKER_USER --password-stdin'
-                }
+                archiveArtifacts artifacts: "target/*.jar", fingerprint: true
             }
         }
 
-        stage('Tag and Push Docker Image') {
+        stage('Deploy') {
             steps {
-                script {
-                    echo "Pushing image: ${IMAGE_NAME}:${BUILD_NUMBER}"
-                    sh "sudo docker push ${IMAGE_NAME}:${BUILD_NUMBER}"
+                echo "Deploying Spring Boot JAR..."
+
+                sh '''
+                    pkill -f ${APP_NAME}.jar || true
                     
-                    echo "Tagging as 'latest'..."
-                    sh "sudo docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
-                    
-                    echo "Pushing 'latest' tag..."
-                    sh "sudo docker push ${IMAGE_NAME}:latest"
-                }
-            }
-        }
-
-        stage('Remove Local Docker Image') {
-            steps {
-                echo "Removing local image: ${IMAGE_NAME}:${BUILD_NUMBER}"
-                sh "sudo docker rmi ${IMAGE_NAME}:${BUILD_NUMBER}"
-            }
-        }
-
-        stage('Run Container') {
-            steps {
-                echo "Running new container ${CONTAINER_NAME} on port 8084..."
-                sh "sudo docker stop ${CONTAINER_NAME} || true"
-                sh "sudo docker rm ${CONTAINER_NAME} || true"
-                sh "sudo docker run -d -p 8085:8080 --name ${CONTAINER_NAME} ${IMAGE_NAME}:latest"
+                    nohup java -jar target/*.jar > app.log 2>&1 &
+                '''
             }
         }
     }
+
     post {
-        always {
-            echo 'This will always run after the stages are complete.'
-        }
         success {
-            echo 'This will run only if the pipeline succeeds.'
+            echo "🚀 Deployment Successful!"
         }
         failure {
-            echo 'This will run only if the pipeline fails.'
+            echo "❌ Build Failed. Check Jenkins logs."
         }
     }
 }
